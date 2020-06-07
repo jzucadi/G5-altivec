@@ -1,0 +1,148 @@
+
+// this routine as written assumes the data are vector aligned,
+
+// and must not be called for less than 96 floats of data
+
+
+
+float vec_sum( float * data, unsigned POINTERSIZEINT N){
+
+register vector float l0, l1, l2, l3, l4, l5, l6, l7;
+
+register vector float s0, s1, s2, s3, s4, s5, s6, s7;
+
+register unsigned POINTERSIZEINT zero =  0, off1 = 16, off2 = 32, off3 = 48, 
+
+                                 off4 = 64, off5 = 80, off6 = 96, off7 = 112;
+
+
+
+register float f = 0.0;
+
+
+
+// this union is used to pass the vector data;
+
+union {
+
+      vector float v;
+
+      float        f[4];
+
+      } u;
+
+
+
+tail = N & 7;
+
+N >>= 3;
+
+N -=2;   // don't call this routine for less than 96 floats, as written
+
+s0 = vec_ld(zero, data);
+
+s1 = vec_ld(off1, data);
+
+s2 = vec_ld(off2, data);
+
+s3 = vec_ld(off3, data);
+
+s4 = vec_ld(off4, data);
+
+s5 = vec_ld(off5, data);
+
+s6 = vec_ld(off6, data);
+
+s7 = vec_ld(off7, data); data += 32; // note 8 vectors = 32 floats
+
+l0 = vec_ld(zero, data);
+
+l1 = vec_ld(off1, data);
+
+l2 = vec_ld(off2, data);
+
+l3 = vec_ld(off3, data);
+
+l4 = vec_ld(off4, data);
+
+l5 = vec_ld(off5, data);
+
+l6 = vec_ld(off6, data);
+
+l7 = vec_ld(off7, data); data += 32; // ditto
+
+do {
+
+   s0 = vec_add(s0, l0); l0 = vec_ld(zero, data);
+
+   s1 = vec_add(s1, l1); l1 = vec_ld(off1, data);
+
+   s2 = vec_add(s2, l2); l2 = vec_ld(off2, data);
+
+   s3 = vec_add(s3, l3); l3 = vec_ld(off3, data);
+
+   s4 = vec_add(s4, l4); l4 = vec_ld(off4, data);
+
+   s5 = vec_add(s5, l5); l5 = vec_ld(off5, data);
+
+   s6 = vec_add(s6, l6); l6 = vec_ld(off6, data);
+
+   s7 = vec_add(s7, l7); l7 = vec_ld(off7, data); data += 32; // ditto
+
+   }
+
+while (--N);
+
+s0 = vec_add(s0, l0);
+
+s1 = vec_add(s1, l1);
+
+s2 = vec_add(s2, l2);
+
+s3 = vec_add(s3, l3);
+
+s4 = vec_add(s4, l4);
+
+s5 = vec_add(s5, l5);
+
+s6 = vec_add(s6, l6);
+
+s7 = vec_add(s7, l7);
+
+
+
+// now get one float which is the sum of all the floats in the vectors
+
+s0 += s1; s2 += s3; s4 += s5; s6 += s7; // sum the vector registers "down"
+
+      s0 += s2;          s4 += s6;
+
+              s0 += s4;
+
+
+
+s1 = vec_sld(s0, s0, 4); // now sum "across" using rotates to align data
+
+s0 = vec_add(s0,s1);     // add s0 to itself rotated by one
+
+s1 = vec_sld(s0, s0, 8); 
+
+s0 = vec_add(s0,s1);     // add s0 to itself rotated by two
+
+// all floats in s0 are the sum of all floats
+
+vec_st(s0, zero, &u.v);  // store that to the union
+
+
+
+while (tail--) { f += *data++; } // clean up any tail work
+
+
+
+f+= u.f[0]; // add in all the vector sums
+
+
+
+return f;
+
+}
