@@ -1,5 +1,6 @@
 # G5-altivec
  Best scalar floating point routines on G5
+ Compile in gcc using -faltivec
  
 Code depends on an algebraic substitution and re-expression of the tight loop written, to break the instruction serialization.
  
