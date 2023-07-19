@@ -1,5 +1,5 @@
 # G5-altivec
- Best scalar floating point routines on G5
+ Best scalar floating point routines on PowerPC G5 Processor
 
 Compile in gcc using -faltivec
  
