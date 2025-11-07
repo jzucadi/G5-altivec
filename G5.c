@@ -1,31 +1,54 @@
+/*
+ * G5.c - Optimized floating point summation for PowerPC G5 with AltiVec
+ * 
+ * Compile with: gcc -O3 -faltivec -maltivec G5.c
+ * 
+ * This implementation uses AltiVec SIMD instructions optimized for the
+ * IBM PowerPC 970 (G5) processor's deep pipeline and memory subsystem.
+ */
+
 #include <altivec.h>
 #include <stdint.h>
-
-// Altivec vector summation routine
-// Requirements: data must be 16-byte aligned, N >= 96 floats
+#include <assert.h>
 
 #define VEC_SIZE 4                              // Floats per vector (128-bit / 32-bit)
 #define UNROLL_FACTOR 8                         // Number of vectors to unroll
 #define BLOCK_FLOATS (VEC_SIZE * UNROLL_FACTOR) // 32 floats per block
 #define BLOCK_BYTES (BLOCK_FLOATS * sizeof(float))
 
+// Prefetch distance for G5 (in cache lines, G5 has 128-byte cache lines)
+#define PREFETCH_DISTANCE 256
+
 /**
- * vec_sum - Sum an array of floats using PowerPC Altivec SIMD instructions
- * @data: Pointer to 16-byte aligned float array
- * @N: Number of floats in array (must be >= 96)
+ * vec_sum - Sum an array of floats using PowerPC AltiVec SIMD instructions
+ * @data: Pointer to float array (must be 16-byte aligned for best performance)
+ * @N: Number of floats in array
  * 
  * Returns: Sum of all elements in the array
  * 
- * Optimizations:
+ * Optimizations for G5:
  * - 8-way loop unrolling to hide latency
+ * - Prefetching for G5's memory subsystem
  * - Reduced register dependency chains
- * - Efficient horizontal reduction
- * - Minimal branching in main loop
+ * - Optimized tail processing
+ * - Proper handling of small arrays
  */
-float vec_sum(float *data, unsigned int N) {
-    // Early exit for invalid input
-    if (N < 96) return 0.0f;
-
+float vec_sum(const float * __restrict__ data, unsigned int N) {
+    // Handle empty array
+    if (N == 0) return 0.0f;
+    
+    // Handle small arrays with scalar loop
+    if (N < BLOCK_FLOATS) {
+        float sum = 0.0f;
+        for (unsigned int i = 0; i < N; ++i) {
+            sum += data[i];
+        }
+        return sum;
+    }
+    
+    // Assert alignment for vectorized path (can be removed in production)
+    assert(((uintptr_t)data & 15) == 0 && "Data should be 16-byte aligned for best performance");
+    
     // Initialize 8 accumulator vectors to zero
     vector float acc0 = vec_splats(0.0f);
     vector float acc1 = vec_splats(0.0f);
@@ -35,16 +58,22 @@ float vec_sum(float *data, unsigned int N) {
     vector float acc5 = vec_splats(0.0f);
     vector float acc6 = vec_splats(0.0f);
     vector float acc7 = vec_splats(0.0f);
-
+    
     const unsigned int blocks = N / BLOCK_FLOATS;
     const unsigned int tail = N % BLOCK_FLOATS;
     
-    float *ptr = data;
-
+    const float *ptr = data;
+    
     // Main vectorized loop - process 32 floats (8 vectors) per iteration
     for (unsigned int b = 0; b < blocks; ++b) {
+        // Prefetch next block for G5's deep pipeline
+        // G5 benefits from aggressive prefetching
+        if (b + 1 < blocks) {
+            vec_dst(ptr + BLOCK_FLOATS, PREFETCH_DISTANCE, 0);
+        }
+        
         // Load and accumulate 8 vectors
-        // Using separate variables reduces register dependencies
+        // Using separate accumulators reduces dependency chains
         acc0 = vec_add(acc0, vec_ld(0 * 16, ptr));
         acc1 = vec_add(acc1, vec_ld(1 * 16, ptr));
         acc2 = vec_add(acc2, vec_ld(2 * 16, ptr));
@@ -56,9 +85,12 @@ float vec_sum(float *data, unsigned int N) {
         
         ptr += BLOCK_FLOATS;
     }
-
+    
+    // Stop prefetching
+    vec_dss(0);
+    
     // Reduce 8 accumulators to 1 using binary tree reduction
-    // This minimizes dependency chains
+    // This minimizes dependency chains on G5's deep pipeline
     acc0 = vec_add(acc0, acc1);
     acc2 = vec_add(acc2, acc3);
     acc4 = vec_add(acc4, acc5);
@@ -68,13 +100,21 @@ float vec_sum(float *data, unsigned int N) {
     acc4 = vec_add(acc4, acc6);
     
     vector float total = vec_add(acc0, acc4);
-
+    
+    // Process tail elements that form complete vectors
+    const unsigned int tail_vectors = tail / VEC_SIZE;
+    for (unsigned int i = 0; i < tail_vectors; ++i) {
+        total = vec_add(total, vec_ld(i * 16, ptr));
+    }
+    ptr += tail_vectors * VEC_SIZE;
+    
     // Horizontal reduction: sum all 4 lanes of the vector
-    // Uses vec_sld (shift left double) for efficient lane extraction
-    total = vec_add(total, vec_sld(total, total, 4));  // Add lanes 0+1, 2+3
-    total = vec_add(total, vec_sld(total, total, 8));  // Add all 4 lanes
-
+    // Method 1: Using vec_sld (shift left double) - good for G5
+    total = vec_add(total, vec_sld(total, total, 8));  // Add lanes 0+2 to 1+3
+    total = vec_add(total, vec_sld(total, total, 4));  // Add to get final sum in all lanes
+    
     // Extract scalar result from vector
+    // Using union for portable extraction
     union {
         vector float v;
         float f[VEC_SIZE];
@@ -82,11 +122,86 @@ float vec_sum(float *data, unsigned int N) {
     
     vec_st(total, 0, &extract.v);
     float result = extract.f[0];
-
-    // Process remaining elements (scalar tail loop)
-    for (unsigned int i = 0; i < tail; ++i) {
+    
+    // Process final scalar elements
+    const unsigned int final_scalars = tail % VEC_SIZE;
+    for (unsigned int i = 0; i < final_scalars; ++i) {
         result += ptr[i];
     }
-
+    
     return result;
 }
+
+#ifdef TEST_VEC_SUM
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+// Test function to verify correctness
+int main() {
+    const int sizes[] = {0, 1, 15, 31, 32, 95, 96, 1000, 10000};
+    const int num_sizes = sizeof(sizes) / sizeof(sizes[0]);
+    
+    for (int s = 0; s < num_sizes; ++s) {
+        int N = sizes[s];
+        
+        // Allocate aligned memory
+        float *data;
+        if (posix_memalign((void**)&data, 16, N * sizeof(float)) != 0) {
+            fprintf(stderr, "Failed to allocate aligned memory\n");
+            return 1;
+        }
+        
+        // Initialize with simple pattern
+        float expected = 0.0f;
+        for (int i = 0; i < N; ++i) {
+            data[i] = (float)(i + 1);
+            expected += data[i];
+        }
+        
+        // Test the function
+        float result = vec_sum(data, N);
+        
+        // Check result (with some tolerance for floating point errors)
+        float error = result - expected;
+        if (error < 0) error = -error;
+        
+        printf("N=%5d: result=%12.2f, expected=%12.2f, error=%e %s\n", 
+               N, result, expected, error,
+               (error < 1e-5 * expected || (expected == 0 && error == 0)) ? "✓" : "✗");
+        
+        free(data);
+    }
+    
+    // Performance test for large array
+    printf("\nPerformance test (N=1000000):\n");
+    const int perf_N = 1000000;
+    float *perf_data;
+    if (posix_memalign((void**)&perf_data, 16, perf_N * sizeof(float)) != 0) {
+        fprintf(stderr, "Failed to allocate aligned memory for performance test\n");
+        return 1;
+    }
+    
+    // Initialize
+    for (int i = 0; i < perf_N; ++i) {
+        perf_data[i] = 1.0f;
+    }
+    
+    // Time the operation
+    clock_t start = clock();
+    float sum = 0;
+    for (int iter = 0; iter < 1000; ++iter) {
+        sum = vec_sum(perf_data, perf_N);
+    }
+    clock_t end = clock();
+    
+    double cpu_time = ((double)(end - start)) / CLOCKS_PER_SEC;
+    printf("1000 iterations: %.3f seconds, sum=%.0f\n", cpu_time, sum);
+    printf("Throughput: %.2f GB/s\n", 
+           (1000.0 * perf_N * sizeof(float)) / (cpu_time * 1e9));
+    
+    free(perf_data);
+    
+    return 0;
+}
+#endif
