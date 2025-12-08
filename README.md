@@ -12,7 +12,7 @@ Optimized floating-point routines for PowerPC G5 (970/970FX) processors using Al
 
 ## Included Implementations
 
-### Vector Summation (`G5. c`)
+### Vector Summation (`G5.c`)
 
 Optimized floating-point array summation using AltiVec SIMD. 
 
@@ -21,7 +21,7 @@ Optimized floating-point array summation using AltiVec SIMD.
 - Strategic prefetch distance tuned for the 970's memory controller
 - Efficient tail processing that vectorizes partial blocks when possible
 
-### FIR Filter (`G5_fir.c`)
+### FIR Filter (`G5_fir. c`)
 
 High-performance FIR filter implementation with two optimized versions:
 
@@ -37,12 +37,23 @@ High-performance FIR filter implementation with two optimized versions:
 - Handles unaligned input loads with `vec_perm()` and `vec_lvsl()`
 - Proper tail processing for any input/filter size
 
-#### Test Suite
+### Matrix-Vector Multiplication (`G5_gemv.c`)
 
-Compile with `-DTEST_FIR_FILTER` to enable:
-- Correctness verification against scalar reference
-- Multiple test configurations
-- Performance benchmarking with speedup metrics
+High-performance GEMV (General Matrix-Vector multiplication) with two operations:
+
+**`gemv()`** - Computes y = A * x (standard matrix-vector product)
+
+**`gemv_transposed()`** - Computes y = A^T * x (transposed matrix-vector product)
+
+#### G5-Specific Optimizations
+
+- 4-way row unrolling to hide memory latency
+- Dual accumulators per row to reduce dependency chains
+- `vec_madd()` fused multiply-add for maximum throughput
+- Multiple prefetch streams for matrix rows and input vector
+- Binary tree horizontal reduction using `vec_sld()`
+- Memory-access optimized transposed version that streams through rows
+- Proper handling of non-aligned tail columns
 
 ## Compilation
 
@@ -58,6 +69,12 @@ gcc -O3 -faltivec -maltivec G5_fir.c -o fir_filter
 
 # FIR filter with test suite
 gcc -O3 -faltivec -maltivec -DTEST_FIR_FILTER G5_fir. c -o fir_filter_test
+
+# GEMV (matrix-vector multiplication)
+gcc -O3 -faltivec -maltivec G5_gemv. c -o gemv
+
+# GEMV with test suite
+gcc -O3 -faltivec -maltivec -DTEST_GEMV G5_gemv.c -o gemv_test
 ```
 
 ## Requirements
@@ -68,11 +85,11 @@ gcc -O3 -faltivec -maltivec -DTEST_FIR_FILTER G5_fir. c -o fir_filter_test
 
 ## Background
 
-AltiVec is a single-precision floating point and integer SIMD instruction set designed and owned by Apple, IBM, and Freescale Semiconductor (formerly Motorola's Semiconductor Products Sector). The PowerPC G5 (IBM 970) features a deep pipeline that particularly benefits from the optimizations in this library.
+AltiVec is a single-precision floating point and integer SIMD instruction set designed and owned by Apple, IBM, and Freescale Semiconductor (formerly Motorola's Semiconductor Products Sector). 
 
 ## Performance Notes
 
-These implementations achieve near-theoretical memory bandwidth on large arrays while maintaining correctness for all input sizes. The G5's deep pipeline particularly benefits from:
+These implementations achieve near-theoretical memory bandwidth on large arrays while maintaining correctness for all input sizes.  The G5's deep pipeline particularly benefits from:
 
 - `__restrict__` qualifiers to enable aggressive compiler optimizations
 - Prefetch instructions tuned for the 970's memory controller
@@ -84,5 +101,6 @@ These implementations achieve near-theoretical memory bandwidth on large arrays 
 | File | Description |
 |------|-------------|
 | `G5.c` | Vectorized floating-point summation routine |
-| `G5_fir. c` | Optimized FIR filter implementations |
+| `G5_fir.c` | Optimized FIR filter implementations |
+| `G5_gemv. c` | Matrix-vector multiplication (GEMV and transposed GEMV) |
 | `README.md` | This documentation |
