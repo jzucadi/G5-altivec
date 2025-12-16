@@ -1,15 +1,17 @@
 /*
  * G5.c - Optimized floating point summation for PowerPC G5 with AltiVec
- * 
+ *
  * Compile with: gcc -O3 -faltivec -maltivec G5.c
- * 
+ *
  * This implementation uses AltiVec SIMD instructions optimized for the
  * IBM PowerPC 970 (G5) processor's deep pipeline and memory subsystem.
  */
 
-#include <altivec.h>
 #include <stdint.h>
 #include <assert.h>
+
+#if defined(__ALTIVEC__) && defined(__VEC__)
+#include <altivec.h>
 
 #define VEC_SIZE 4                              // Floats per vector (128-bit / 32-bit)
 #define UNROLL_FACTOR 8                         // Number of vectors to unroll
@@ -120,7 +122,7 @@ float vec_sum(const float * __restrict__ data, unsigned int N) {
         float f[VEC_SIZE];
     } extract;
     
-    vec_st(total, 0, &extract.v);
+    vec_st(total, 0, extract.f);
     float result = extract.f[0];
     
     // Process final scalar elements
@@ -201,7 +203,19 @@ int main() {
            (1000.0 * perf_N * sizeof(float)) / (cpu_time * 1e9));
     
     free(perf_data);
-    
+
     return 0;
 }
-#endif
+#endif /* TEST_VEC_SUM */
+
+#else /* !(__ALTIVEC__ && __VEC__) */
+
+#warning "AltiVec not available - this code requires PowerPC with AltiVec support"
+
+/* Provide stub declaration so the file can be parsed on non-PowerPC systems */
+float vec_sum(const float *data, unsigned int N) {
+    (void)data; (void)N;
+    return 0.0f;
+}
+
+#endif /* __ALTIVEC__ && __VEC__ */

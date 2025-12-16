@@ -1,16 +1,18 @@
 /*
- * G5_fir. c - Optimized FIR filter for PowerPC G5 with AltiVec
+ * G5_fir.c - Optimized FIR filter for PowerPC G5 with AltiVec
  *
- * Compile with: gcc -O3 -faltivec -maltivec G5_fir. c
+ * Compile with: gcc -O3 -faltivec -maltivec G5_fir.c
  *
  * This implementation uses AltiVec SIMD instructions optimized for the
  * IBM PowerPC 970 (G5) processor's deep pipeline and memory subsystem.
  */
 
-#include <altivec.h>
 #include <stdint.h>
 #include <assert.h>
 #include <string.h>
+
+#if defined(__ALTIVEC__) && defined(__VEC__)
+#include <altivec.h>
 
 #define VEC_SIZE 4                              // Floats per vector (128-bit / 32-bit)
 #define UNROLL_FACTOR 8                         // Number of output samples per iteration
@@ -247,10 +249,6 @@ void fir_filter_vectorized(const float * __restrict__ input,
     assert(((uintptr_t)output & 15) == 0 && "Output should be 16-byte aligned");
 
     const unsigned int vec_outputs = output_len / VEC_SIZE;
-    const unsigned int scalar_tail = output_len % VEC_SIZE;
-
-    // Pre-compute permutation vector for unaligned loads (computed once)
-    vector unsigned char perm_template = vec_lvsl(0, (float*)0);
 
     // Set up prefetch stream
     vec_dst(input, DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE), 0);
@@ -333,3 +331,22 @@ void fir_filter_vectorized(const float * __restrict__ input,
         output[n] = sum;
     }
 }
+
+#else /* !(__ALTIVEC__ && __VEC__) */
+
+#warning "AltiVec not available - this code requires PowerPC with AltiVec support"
+
+/* Provide stub declarations so the file can be parsed on non-PowerPC systems */
+void fir_filter(const float *input, float *output, const float *coeffs,
+                unsigned int input_len, unsigned int filter_len) {
+    (void)input; (void)output; (void)coeffs;
+    (void)input_len; (void)filter_len;
+}
+
+void fir_filter_vectorized(const float *input, float *output, const float *coeffs,
+                           unsigned int input_len, unsigned int filter_len) {
+    (void)input; (void)output; (void)coeffs;
+    (void)input_len; (void)filter_len;
+}
+
+#endif /* __ALTIVEC__ && __VEC__ */
