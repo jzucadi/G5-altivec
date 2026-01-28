@@ -7,38 +7,16 @@
  * IBM PowerPC 970 (G5) processor's deep pipeline and memory subsystem.
  */
 
-#include <stdint.h>
-#include <assert.h>
 #include <string.h>
+#include "altivec_common.h"
 
 #if defined(__ALTIVEC__) && defined(__VEC__)
-#include <altivec.h>
 
-#define VEC_SIZE 4                              // Floats per vector (128-bit / 32-bit)
 #define UNROLL_FACTOR 8                         // Number of output samples per iteration
 #define BLOCK_FLOATS (VEC_SIZE * UNROLL_FACTOR) // 32 floats per block
 
-// Prefetch parameters for G5 (128-byte cache lines)
-// DST control word: block size (5 bits) | block count (8 bits) | block stride (16 bits)
-#define DST_CONTROL(size, count, stride) (((size) << 24) | ((count) << 16) | (stride))
-#define PREFETCH_BLOCKS 8
-#define PREFETCH_STRIDE 128  // G5 cache line size
-
 // Maximum filter length for stack-allocated coefficient vector
 #define MAX_FILTER_LEN 256
-
-// Helper macro for efficient scalar extraction (GCC/Clang)
-#if defined(__GNUC__) || defined(__clang__)
-#define VEC_EXTRACT(v, i) vec_extract((v), (i))
-#else
-// Fallback for other compilers
-static inline float vec_extract_scalar(vector float v, int i) {
-    union { vector float vec; float f[4]; } u;
-    u.vec = v;
-    return u.f[i];
-}
-#define VEC_EXTRACT(v, i) vec_extract_scalar((v), (i))
-#endif
 
 /**
  * fir_filter - Apply FIR filter to input signal using PowerPC AltiVec SIMD
@@ -190,15 +168,15 @@ void fir_filter(const float * __restrict__ input,
             acc7 = vec_madd(coeff, vec_splats(in_ptr[7]), acc7);
         }
 
-        // Extract scalar results efficiently using vec_extract
-        output[out_idx + 0] = VEC_EXTRACT(acc0, 0);
-        output[out_idx + 1] = VEC_EXTRACT(acc1, 0);
-        output[out_idx + 2] = VEC_EXTRACT(acc2, 0);
-        output[out_idx + 3] = VEC_EXTRACT(acc3, 0);
-        output[out_idx + 4] = VEC_EXTRACT(acc4, 0);
-        output[out_idx + 5] = VEC_EXTRACT(acc5, 0);
-        output[out_idx + 6] = VEC_EXTRACT(acc6, 0);
-        output[out_idx + 7] = VEC_EXTRACT(acc7, 0);
+        // Extract scalar results using shared extraction function
+        output[out_idx + 0] = vec_extract_first(acc0);
+        output[out_idx + 1] = vec_extract_first(acc1);
+        output[out_idx + 2] = vec_extract_first(acc2);
+        output[out_idx + 3] = vec_extract_first(acc3);
+        output[out_idx + 4] = vec_extract_first(acc4);
+        output[out_idx + 5] = vec_extract_first(acc5);
+        output[out_idx + 6] = vec_extract_first(acc6);
+        output[out_idx + 7] = vec_extract_first(acc7);
 
         out_idx += UNROLL_FACTOR;
     }

@@ -9,19 +9,11 @@
  * Computes: y = A * x  (where A is M x N matrix, x is N-vector, y is M-vector)
  */
 
-#include <stdint.h>
-#include <assert.h>
+#include "altivec_common.h"
 
 #if defined(__ALTIVEC__) && defined(__VEC__)
-#include <altivec.h>
 
-#define VEC_SIZE 4                              // Floats per vector (128-bit / 32-bit)
 #define UNROLL_FACTOR 4                         // Rows processed per iteration
-
-// Prefetch parameters for G5 (128-byte cache lines)
-#define DST_CONTROL(size, count, stride) (((size) << 24) | ((count) << 16) | (stride))
-#define PREFETCH_BLOCKS 8
-#define PREFETCH_STRIDE 128  // G5 cache line size
 
 /**
  * gemv - Matrix-vector multiplication using PowerPC AltiVec SIMD
@@ -149,39 +141,11 @@ void gemv(const float * __restrict__ A,
         vector float sum2 = vec_add(acc2a, acc2b);
         vector float sum3 = vec_add(acc3a, acc3b);
 
-        // Horizontal reduction for each row using vec_sld
-        // This minimizes dependency chains on G5's deep pipeline
-        sum0 = vec_add(sum0, vec_sld(sum0, sum0, 8));
-        sum0 = vec_add(sum0, vec_sld(sum0, sum0, 4));
-
-        sum1 = vec_add(sum1, vec_sld(sum1, sum1, 8));
-        sum1 = vec_add(sum1, vec_sld(sum1, sum1, 4));
-
-        sum2 = vec_add(sum2, vec_sld(sum2, sum2, 8));
-        sum2 = vec_add(sum2, vec_sld(sum2, sum2, 4));
-
-        sum3 = vec_add(sum3, vec_sld(sum3, sum3, 8));
-        sum3 = vec_add(sum3, vec_sld(sum3, sum3, 4));
-
-        // Extract scalar results
-        union {
-            vector float v;
-            float f[VEC_SIZE];
-        } extract;
-
-        float result0, result1, result2, result3;
-
-        vec_st(sum0, 0, extract.f);
-        result0 = extract.f[0];
-
-        vec_st(sum1, 0, extract.f);
-        result1 = extract.f[0];
-
-        vec_st(sum2, 0, extract.f);
-        result2 = extract.f[0];
-
-        vec_st(sum3, 0, extract.f);
-        result3 = extract.f[0];
+        // Horizontal reduction and scalar extraction for each row
+        float result0 = horizontal_sum_scalar(sum0);
+        float result1 = horizontal_sum_scalar(sum1);
+        float result2 = horizontal_sum_scalar(sum2);
+        float result3 = horizontal_sum_scalar(sum3);
 
         // Handle tail columns with scalar code
         if (col_tail > 0) {
@@ -222,17 +186,8 @@ void gemv(const float * __restrict__ A,
             acc = vec_madd(av, xv, acc);
         }
 
-        // Horizontal reduction
-        acc = vec_add(acc, vec_sld(acc, acc, 8));
-        acc = vec_add(acc, vec_sld(acc, acc, 4));
-
-        union {
-            vector float v;
-            float f[VEC_SIZE];
-        } extract;
-
-        vec_st(acc, 0, extract.f);
-        float result = extract.f[0];
+        // Horizontal reduction and scalar extraction
+        float result = horizontal_sum_scalar(acc);
 
         // Scalar tail
         unsigned int tail_start = col_vecs * VEC_SIZE;

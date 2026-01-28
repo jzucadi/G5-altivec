@@ -7,13 +7,9 @@
  * IBM PowerPC 970 (G5) processor's deep pipeline and memory subsystem.
  */
 
-#include <stdint.h>
-#include <assert.h>
+#include "altivec_common.h"
 
 #if defined(__ALTIVEC__) && defined(__VEC__)
-#include <altivec.h>
-
-#define VEC_SIZE 4                              // Floats per vector (128-bit / 32-bit)
 #define UNROLL_FACTOR 8                         // Number of vectors to unroll
 #define BLOCK_FLOATS (VEC_SIZE * UNROLL_FACTOR) // 32 floats per block
 #define BLOCK_BYTES (BLOCK_FLOATS * sizeof(float))
@@ -111,19 +107,7 @@ float vec_sum(const float * __restrict__ data, unsigned int N) {
     ptr += tail_vectors * VEC_SIZE;
     
     // Horizontal reduction: sum all 4 lanes of the vector
-    // Method 1: Using vec_sld (shift left double) - good for G5
-    total = vec_add(total, vec_sld(total, total, 8));  // Add lanes 0+2 to 1+3
-    total = vec_add(total, vec_sld(total, total, 4));  // Add to get final sum in all lanes
-    
-    // Extract scalar result from vector
-    // Using union for portable extraction
-    union {
-        vector float v;
-        float f[VEC_SIZE];
-    } extract;
-    
-    vec_st(total, 0, extract.f);
-    float result = extract.f[0];
+    float result = horizontal_sum_scalar(total);
     
     // Process final scalar elements
     const unsigned int final_scalars = tail % VEC_SIZE;

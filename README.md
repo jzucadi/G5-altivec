@@ -100,6 +100,7 @@ These implementations achieve near-theoretical memory bandwidth on large arrays 
 
 | File | Description |
 |------|-------------|
+| `altivec_common.h` | Shared AltiVec utilities (macros, inline functions) |
 | `G5.c` | Vectorized floating-point summation routine |
 | `G5_fir.c` | Optimized FIR filter implementations |
 | `G5_gemv.c` | Matrix-vector multiplication (GEMV and transposed GEMV) |
