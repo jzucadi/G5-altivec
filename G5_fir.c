@@ -318,6 +318,201 @@ void fir_filter_vectorized(const float * __restrict__ input,
     }
 }
 
+#ifdef TEST_FIR_FILTER
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <math.h>
+
+// Scalar reference implementation for verification
+static void fir_filter_scalar(const float *input, float *output,
+                              const float *coeffs,
+                              unsigned int input_len, unsigned int filter_len) {
+    if (input_len < filter_len || filter_len == 0) return;
+    unsigned int output_len = input_len - filter_len + 1;
+    for (unsigned int n = 0; n < output_len; ++n) {
+        float sum = 0.0f;
+        for (unsigned int k = 0; k < filter_len; ++k) {
+            sum += coeffs[k] * input[n + k];
+        }
+        output[n] = sum;
+    }
+}
+
+static float max_error(const float *a, const float *b, unsigned int n) {
+    float max_err = 0.0f;
+    for (unsigned int i = 0; i < n; ++i) {
+        float err = fabsf(a[i] - b[i]);
+        if (err > max_err) max_err = err;
+    }
+    return max_err;
+}
+
+int main() {
+    printf("=== G5 AltiVec FIR Filter Test Suite ===\n\n");
+
+    // Test configurations: {input_len, filter_len}
+    const unsigned int configs[][2] = {
+        {16, 4},      // Small
+        {32, 8},      // Matches unroll factor
+        {64, 16},     // Medium
+        {100, 7},     // Odd sizes
+        {256, 32},    // Larger
+        {1024, 64},   // Performance test
+        {1024, 128},  // Max filter length
+        {1024, 200},  // Exceeds MAX_FILTER_LEN (uses scalar fallback)
+    };
+    const int num_configs = sizeof(configs) / sizeof(configs[0]);
+
+    int all_passed = 1;
+
+    printf("--- Correctness Tests (fir_filter) ---\n");
+
+    for (int c = 0; c < num_configs; ++c) {
+        unsigned int input_len = configs[c][0];
+        unsigned int filter_len = configs[c][1];
+        unsigned int output_len = input_len - filter_len + 1;
+
+        // Allocate aligned memory
+        float *input, *coeffs, *output_vec, *output_ref;
+        if (posix_memalign((void**)&input, 16, input_len * sizeof(float)) != 0 ||
+            posix_memalign((void**)&coeffs, 16, filter_len * sizeof(float)) != 0 ||
+            posix_memalign((void**)&output_vec, 16, output_len * sizeof(float)) != 0 ||
+            posix_memalign((void**)&output_ref, 16, output_len * sizeof(float)) != 0) {
+            fprintf(stderr, "Memory allocation failed\n");
+            return 1;
+        }
+
+        // Initialize with test pattern
+        for (unsigned int i = 0; i < input_len; ++i) {
+            input[i] = (float)((i % 17) - 8) * 0.1f;
+        }
+        for (unsigned int k = 0; k < filter_len; ++k) {
+            coeffs[k] = (float)((k % 5) - 2) * 0.2f;
+        }
+
+        // Compute reference
+        fir_filter_scalar(input, output_ref, coeffs, input_len, filter_len);
+
+        // Compute vectorized
+        fir_filter(input, output_vec, coeffs, input_len, filter_len);
+
+        // Check results
+        float err = max_error(output_vec, output_ref, output_len);
+        int passed = (err < 1e-5f);
+
+        printf("input=%4u, filter=%3u, output=%4u: max_err=%e %s\n",
+               input_len, filter_len, output_len, err, passed ? "[PASS]" : "[FAIL]");
+
+        if (!passed) all_passed = 0;
+
+        free(input);
+        free(coeffs);
+        free(output_vec);
+        free(output_ref);
+    }
+
+    printf("\n--- Correctness Tests (fir_filter_vectorized) ---\n");
+
+    for (int c = 0; c < num_configs; ++c) {
+        unsigned int input_len = configs[c][0];
+        unsigned int filter_len = configs[c][1];
+        unsigned int output_len = input_len - filter_len + 1;
+
+        float *input, *coeffs, *output_vec, *output_ref;
+        if (posix_memalign((void**)&input, 16, input_len * sizeof(float)) != 0 ||
+            posix_memalign((void**)&coeffs, 16, filter_len * sizeof(float)) != 0 ||
+            posix_memalign((void**)&output_vec, 16, output_len * sizeof(float)) != 0 ||
+            posix_memalign((void**)&output_ref, 16, output_len * sizeof(float)) != 0) {
+            fprintf(stderr, "Memory allocation failed\n");
+            return 1;
+        }
+
+        for (unsigned int i = 0; i < input_len; ++i) {
+            input[i] = (float)((i % 17) - 8) * 0.1f;
+        }
+        for (unsigned int k = 0; k < filter_len; ++k) {
+            coeffs[k] = (float)((k % 5) - 2) * 0.2f;
+        }
+
+        fir_filter_scalar(input, output_ref, coeffs, input_len, filter_len);
+        fir_filter_vectorized(input, output_vec, coeffs, input_len, filter_len);
+
+        float err = max_error(output_vec, output_ref, output_len);
+        int passed = (err < 1e-5f);
+
+        printf("input=%4u, filter=%3u, output=%4u: max_err=%e %s\n",
+               input_len, filter_len, output_len, err, passed ? "[PASS]" : "[FAIL]");
+
+        if (!passed) all_passed = 0;
+
+        free(input);
+        free(coeffs);
+        free(output_vec);
+        free(output_ref);
+    }
+
+    // Performance benchmark
+    printf("\n--- Performance Benchmark ---\n");
+
+    const unsigned int perf_input = 10000;
+    const unsigned int perf_filter = 64;
+    const unsigned int perf_output = perf_input - perf_filter + 1;
+    const int iterations = 1000;
+
+    float *input, *coeffs, *output;
+    if (posix_memalign((void**)&input, 16, perf_input * sizeof(float)) != 0 ||
+        posix_memalign((void**)&coeffs, 16, perf_filter * sizeof(float)) != 0 ||
+        posix_memalign((void**)&output, 16, perf_output * sizeof(float)) != 0) {
+        fprintf(stderr, "Memory allocation failed for benchmark\n");
+        return 1;
+    }
+
+    for (unsigned int i = 0; i < perf_input; ++i) input[i] = 1.0f;
+    for (unsigned int k = 0; k < perf_filter; ++k) coeffs[k] = 1.0f / perf_filter;
+
+    // Benchmark scalar
+    clock_t start = clock();
+    for (int iter = 0; iter < iterations; ++iter) {
+        fir_filter_scalar(input, output, coeffs, perf_input, perf_filter);
+    }
+    clock_t end = clock();
+    double scalar_time = ((double)(end - start)) / CLOCKS_PER_SEC;
+
+    // Benchmark fir_filter
+    start = clock();
+    for (int iter = 0; iter < iterations; ++iter) {
+        fir_filter(input, output, coeffs, perf_input, perf_filter);
+    }
+    end = clock();
+    double vec_time = ((double)(end - start)) / CLOCKS_PER_SEC;
+
+    // Benchmark fir_filter_vectorized
+    start = clock();
+    for (int iter = 0; iter < iterations; ++iter) {
+        fir_filter_vectorized(input, output, coeffs, perf_input, perf_filter);
+    }
+    end = clock();
+    double vec2_time = ((double)(end - start)) / CLOCKS_PER_SEC;
+
+    printf("Input: %u samples, Filter: %u taps (%d iterations)\n\n",
+           perf_input, perf_filter, iterations);
+    printf("Scalar:              %.3f sec\n", scalar_time);
+    printf("fir_filter:          %.3f sec (%.2fx speedup)\n",
+           vec_time, scalar_time / vec_time);
+    printf("fir_filter_vectorized: %.3f sec (%.2fx speedup)\n",
+           vec2_time, scalar_time / vec2_time);
+
+    free(input);
+    free(coeffs);
+    free(output);
+
+    printf("\n=== %s ===\n", all_passed ? "ALL TESTS PASSED" : "SOME TESTS FAILED");
+
+    return all_passed ? 0 : 1;
+}
+#endif /* TEST_FIR_FILTER */
+
 #else /* !(__ALTIVEC__ && __VEC__) */
 
 #warning "AltiVec not available - this code requires PowerPC with AltiVec support"
