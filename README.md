@@ -21,7 +21,7 @@ Optimized floating-point array summation using AltiVec SIMD.
 - Strategic prefetch distance tuned for the 970's memory controller
 - Efficient tail processing that vectorizes partial blocks when possible
 
-### FIR Filter (`G5_fir. c`)
+### FIR Filter (`G5_fir.c`)
 
 High-performance FIR filter implementation with two optimized versions:
 
@@ -68,10 +68,10 @@ gcc -O3 -faltivec -maltivec -DTEST_VEC_SUM G5.c -o vec_sum_test
 gcc -O3 -faltivec -maltivec G5_fir.c -o fir_filter
 
 # FIR filter with test suite
-gcc -O3 -faltivec -maltivec -DTEST_FIR_FILTER G5_fir. c -o fir_filter_test
+gcc -O3 -faltivec -maltivec -DTEST_FIR_FILTER G5_fir.c -o fir_filter_test
 
 # GEMV (matrix-vector multiplication)
-gcc -O3 -faltivec -maltivec G5_gemv. c -o gemv
+gcc -O3 -faltivec -maltivec G5_gemv.c -o gemv
 
 # GEMV with test suite
 gcc -O3 -faltivec -maltivec -DTEST_GEMV G5_gemv.c -o gemv_test
@@ -102,5 +102,5 @@ These implementations achieve near-theoretical memory bandwidth on large arrays 
 |------|-------------|
 | `G5.c` | Vectorized floating-point summation routine |
 | `G5_fir.c` | Optimized FIR filter implementations |
-| `G5_gemv. c` | Matrix-vector multiplication (GEMV and transposed GEMV) |
+| `G5_gemv.c` | Matrix-vector multiplication (GEMV and transposed GEMV) |
 | `README.md` | This documentation |

@@ -33,7 +33,8 @@
 #else
 // Fallback for other compilers
 static inline float vec_extract_scalar(vector float v, int i) {
-    union { vector float vec; float f[4]; } u = { . vec = v };
+    union { vector float vec; float f[4]; } u;
+    u.vec = v;
     return u.f[i];
 }
 #define VEC_EXTRACT(v, i) vec_extract_scalar((v), (i))
@@ -281,7 +282,11 @@ void fir_filter_vectorized(const float * __restrict__ input,
 
             if (((uintptr_t)ptr0 & 15) == 0) {
                 in_vec0 = vec_ld(0, ptr0);
-                in_vec1 = vec_ld(0, ptr1);  // This will be unaligned
+                // ptr1 is ptr0+4 bytes, so it's unaligned - use permute method
+                vector float v1_1 = vec_ld(0, ptr1);
+                vector float v2_1 = vec_ld(16, ptr1);
+                vector unsigned char perm1 = vec_lvsl(0, ptr1);
+                in_vec1 = vec_perm(v1_1, v2_1, perm1);
             } else {
                 vector float v1_0 = vec_ld(0, ptr0);
                 vector float v2_0 = vec_ld(16, ptr0);

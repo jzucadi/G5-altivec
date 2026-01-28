@@ -299,6 +299,7 @@ void gemv_transposed(const float * __restrict__ A,
     }
 
     assert(((uintptr_t)A & 15) == 0 && "Matrix A should be 16-byte aligned");
+    assert(((uintptr_t)x & 15) == 0 && "Vector x should be 16-byte aligned");
     assert(((uintptr_t)y & 15) == 0 && "Vector y should be 16-byte aligned");
 
     const unsigned int col_vecs = N / VEC_SIZE;
