@@ -61,8 +61,8 @@ void fir_filter(const float * __restrict__ input,
     }
 
     // Assert alignment for vectorized path
-    assert(((uintptr_t)input & 15) == 0 && "Input should be 16-byte aligned");
-    assert(((uintptr_t)output & 15) == 0 && "Output should be 16-byte aligned");
+    ASSERT_ALIGNED(input, "Input");
+    ASSERT_ALIGNED(output, "Output");
 
     // Pre-splat coefficients into vectors for efficient broadcasting
     // Use actual filter length, capped at MAX_FILTER_LEN
@@ -224,8 +224,8 @@ void fir_filter_vectorized(const float * __restrict__ input,
         return;
     }
 
-    assert(((uintptr_t)input & 15) == 0 && "Input should be 16-byte aligned");
-    assert(((uintptr_t)output & 15) == 0 && "Output should be 16-byte aligned");
+    ASSERT_ALIGNED(input, "Input");
+    ASSERT_ALIGNED(output, "Output");
 
     const unsigned int vec_outputs = output_len / VEC_SIZE;
 

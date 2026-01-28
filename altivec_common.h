@@ -36,6 +36,13 @@
     assert(((uintptr_t)(ptr) & 15) == 0 && msg " should be 16-byte aligned")
 
 /*
+ * Byte offset calculation for vec_ld/vec_st
+ * Converts vector index to byte offset (index * 16 bytes per vector)
+ * vec_ld requires int type for offset parameter
+ */
+#define VEC_BYTE_OFFSET(idx) ((int)((idx) * 16))
+
+/*
  * vec_extract_first - Extract the first scalar element from a vector
  * @v: The vector float to extract from
  *

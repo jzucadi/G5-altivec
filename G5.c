@@ -45,7 +45,7 @@ float vec_sum(const float * __restrict__ data, unsigned int N) {
     }
     
     // Assert alignment for vectorized path (can be removed in production)
-    assert(((uintptr_t)data & 15) == 0 && "Data should be 16-byte aligned for best performance");
+    ASSERT_ALIGNED(data, "Data");
     
     // Initialize 8 accumulator vectors to zero
     vector float acc0 = vec_splats(0.0f);

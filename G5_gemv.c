@@ -59,9 +59,9 @@ void gemv(const float * __restrict__ A,
     }
 
     // Assert alignment for vectorized path
-    assert(((uintptr_t)A & 15) == 0 && "Matrix A should be 16-byte aligned");
-    assert(((uintptr_t)x & 15) == 0 && "Vector x should be 16-byte aligned");
-    assert(((uintptr_t)y & 15) == 0 && "Vector y should be 16-byte aligned");
+    ASSERT_ALIGNED(A, "Matrix A");
+    ASSERT_ALIGNED(x, "Vector x");
+    ASSERT_ALIGNED(y, "Vector y");
 
     const unsigned int row_blocks = M / UNROLL_FACTOR;
     const unsigned int col_vecs = N / VEC_SIZE;
@@ -99,8 +99,8 @@ void gemv(const float * __restrict__ A,
         const unsigned int col_unroll = (col_vecs / 2) * 2;
 
         for (; col < col_unroll; col += 2) {
-            int byte_off0 = (int)(col * 16);
-            int byte_off1 = (int)((col + 1) * 16);
+            int byte_off0 = VEC_BYTE_OFFSET(col);
+            int byte_off1 = VEC_BYTE_OFFSET(col + 1);
 
             // Load 2 vectors from x
             vector float xv0 = vec_ld(byte_off0, x);
@@ -126,7 +126,7 @@ void gemv(const float * __restrict__ A,
 
         // Handle remaining complete vector
         for (; col < col_vecs; ++col) {
-            int byte_off = (int)(col * 16);
+            int byte_off = VEC_BYTE_OFFSET(col);
             vector float xv = vec_ld(byte_off, x);
 
             acc0a = vec_madd(vec_ld(byte_off, row0), xv, acc0a);
@@ -180,7 +180,7 @@ void gemv(const float * __restrict__ A,
 
         // Vectorized portion
         for (unsigned int col = 0; col < col_vecs; ++col) {
-            int byte_off = (int)(col * 16);
+            int byte_off = VEC_BYTE_OFFSET(col);
             vector float xv = vec_ld(byte_off, x);
             vector float av = vec_ld(byte_off, row_ptr);
             acc = vec_madd(av, xv, acc);
@@ -253,9 +253,9 @@ void gemv_transposed(const float * __restrict__ A,
         return;
     }
 
-    assert(((uintptr_t)A & 15) == 0 && "Matrix A should be 16-byte aligned");
-    assert(((uintptr_t)x & 15) == 0 && "Vector x should be 16-byte aligned");
-    assert(((uintptr_t)y & 15) == 0 && "Vector y should be 16-byte aligned");
+    ASSERT_ALIGNED(A, "Matrix A");
+    ASSERT_ALIGNED(x, "Vector x");
+    ASSERT_ALIGNED(y, "Vector y");
 
     const unsigned int col_vecs = N / VEC_SIZE;
     const unsigned int col_tail = N % VEC_SIZE;
@@ -281,7 +281,7 @@ void gemv_transposed(const float * __restrict__ A,
 
         // Process columns in vectors
         for (unsigned int col = 0; col < col_vecs; ++col) {
-            int byte_off = (int)(col * 16);
+            int byte_off = VEC_BYTE_OFFSET(col);
 
             vector float yv = vec_ld(byte_off, y);
             vector float a0 = vec_ld(byte_off, row0);
@@ -313,7 +313,7 @@ void gemv_transposed(const float * __restrict__ A,
         vector float xv = vec_splats(xi);
 
         for (unsigned int col = 0; col < col_vecs; ++col) {
-            int byte_off = (int)(col * 16);
+            int byte_off = VEC_BYTE_OFFSET(col);
             vector float yv = vec_ld(byte_off, y);
             vector float av = vec_ld(byte_off, row_ptr);
             yv = vec_madd(av, xv, yv);
