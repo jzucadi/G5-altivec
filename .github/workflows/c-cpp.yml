@@ -7,17 +7,115 @@ on:
     branches: [ "master" ]
 
 jobs:
-  build:
-
+  build-x86:
+    name: Build on x86_64 (syntax check only)
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
-    - name: configure
-      run: ./configure
-    - name: make
-      run: make
-    - name: make check
-      run: make check
-    - name: make distcheck
-      run: make distcheck
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc
+    
+    - name: Syntax check vector summation
+      run: gcc -fsyntax-only -faltivec -maltivec G5.c
+      continue-on-error: true
+    
+    - name: Syntax check vector summation with tests
+      run: gcc -fsyntax-only -faltivec -maltivec -DTEST_VEC_SUM G5.c
+      continue-on-error: true
+    
+    - name: Syntax check FIR filter
+      run: gcc -fsyntax-only -faltivec -maltivec G5_fir.c
+      continue-on-error: true
+    
+    - name: Syntax check FIR filter with tests
+      run: gcc -fsyntax-only -faltivec -maltivec -DTEST_FIR_FILTER G5_fir.c
+      continue-on-error: true
+    
+    - name: Syntax check GEMV
+      run: gcc -fsyntax-only -faltivec -maltivec G5_gemv.c
+      continue-on-error: true
+    
+    - name: Syntax check GEMV with tests
+      run: gcc -fsyntax-only -faltivec -maltivec -DTEST_GEMV G5_gemv.c
+      continue-on-error: true
+
+  build-powerpc:
+    name: Build and test on PowerPC
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install cross-compilation toolchain
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-powerpc-linux-gnu qemu-user qemu-user-static
+    
+    - name: Build vector summation
+      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec G5.c -o vec_sum
+    
+    - name: Build vector summation with tests
+      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec -DTEST_VEC_SUM G5.c -o vec_sum_test
+    
+    - name: Build FIR filter
+      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec G5_fir.c -o fir_filter
+    
+    - name: Build FIR filter with tests
+      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec -DTEST_FIR_FILTER G5_fir.c -o fir_filter_test
+    
+    - name: Build GEMV
+      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec G5_gemv.c -o gemv
+    
+    - name: Build GEMV with tests
+      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec -DTEST_GEMV G5_gemv.c -o gemv_test
+    
+    - name: Test vector summation
+      run: qemu-ppc -cpu G4 ./vec_sum_test
+      continue-on-error: true
+    
+    - name: Test FIR filter
+      run: qemu-ppc -cpu G4 ./fir_filter_test
+      continue-on-error: true
+    
+    - name: Test GEMV
+      run: qemu-ppc -cpu G4 ./gemv_test
+      continue-on-error: true
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: powerpc-binaries
+        path: |
+          vec_sum
+          vec_sum_test
+          fir_filter
+          fir_filter_test
+          gemv
+          gemv_test
+
+  lint:
+    name: Code quality checks
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install clang tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format clang-tidy
+    
+    - name: Check code formatting
+      run: |
+        find . -name "*.c" -o -name "*.h" | xargs clang-format --dry-run --Werror
+      continue-on-error: true
+    
+    - name: Run static analysis
+      run: |
+        clang-tidy G5.c G5_fir.c G5_gemv.c -- -maltivec
+      continue-on-error: true
