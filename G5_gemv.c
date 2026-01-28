@@ -68,7 +68,7 @@ void gemv(const float * __restrict__ A,
     const unsigned int col_tail = N % VEC_SIZE;
 
     // Set up prefetch stream for x vector
-    vec_dst(x, DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE), 0);
+    vec_dst(x, PREFETCH_CONTROL_SEQ, 0);
 
     unsigned int row = 0;
 
@@ -79,9 +79,9 @@ void gemv(const float * __restrict__ A,
         const float *row2 = A + (row + 2) * lda;
         const float *row3 = A + (row + 3) * lda;
 
-        // Set up prefetch for matrix rows
-        vec_dst(row0, DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE), 1);
-        vec_dst(row1, DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE), 2);
+        // Set up prefetch for matrix rows (use streams 1 and 2)
+        vec_dst(row0, PREFETCH_CONTROL_SEQ, 1);
+        vec_dst(row1, PREFETCH_CONTROL_SEQ, 2);
 
         // Initialize 4 accumulator vectors (one per row), with 2 accumulators each
         // Using 2 accumulators per row reduces dependency chains
@@ -265,7 +265,7 @@ void gemv_transposed(const float * __restrict__ A,
     unsigned int i = 0;
     const unsigned int row_unroll = (M / 2) * 2;
 
-    vec_dst(A, DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE), 0);
+    vec_dst(A, PREFETCH_CONTROL_SEQ, 0);
 
     for (; i < row_unroll; i += 2) {
         const float *row0 = A + i * lda;
@@ -273,7 +273,7 @@ void gemv_transposed(const float * __restrict__ A,
 
         // Prefetch next rows
         if (i + 2 < M) {
-            vec_dst(A + (i + 2) * lda, DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE), 0);
+            vec_dst(A + (i + 2) * lda, PREFETCH_CONTROL_SEQ, 0);
         }
 
         vector float x0 = vec_splats(x[i]);

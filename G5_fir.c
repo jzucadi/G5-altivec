@@ -15,8 +15,12 @@
 #define UNROLL_FACTOR 8                         // Number of output samples per iteration
 #define BLOCK_FLOATS (VEC_SIZE * UNROLL_FACTOR) // 32 floats per block
 
-// Maximum filter length for stack-allocated coefficient vector
-#define MAX_FILTER_LEN 256
+/*
+ * Maximum filter length for stack-allocated coefficient vector
+ * 128 vectors * 16 bytes = 2KB stack usage (safe for most applications)
+ * Filters longer than this fall back to scalar processing
+ */
+#define MAX_FILTER_LEN 128
 
 /**
  * fir_filter - Apply FIR filter to input signal using PowerPC AltiVec SIMD
@@ -48,8 +52,8 @@ void fir_filter(const float * __restrict__ input,
 
     const unsigned int output_len = input_len - filter_len + 1;
 
-    // For small filters or outputs, use scalar implementation
-    if (filter_len < VEC_SIZE || output_len < UNROLL_FACTOR) {
+    // For small filters, large filters (stack safety), or small outputs, use scalar
+    if (filter_len < VEC_SIZE || filter_len > MAX_FILTER_LEN || output_len < UNROLL_FACTOR) {
         for (unsigned int n = 0; n < output_len; ++n) {
             float sum = 0.0f;
             for (unsigned int k = 0; k < filter_len; ++k) {
@@ -65,11 +69,10 @@ void fir_filter(const float * __restrict__ input,
     ASSERT_ALIGNED(output, "Output");
 
     // Pre-splat coefficients into vectors for efficient broadcasting
-    // Use actual filter length, capped at MAX_FILTER_LEN
-    const unsigned int coeff_count = (filter_len < MAX_FILTER_LEN) ? filter_len : MAX_FILTER_LEN;
+    // Note: filter_len <= MAX_FILTER_LEN is guaranteed by the early return above
     vector float coeff_vecs[MAX_FILTER_LEN];
 
-    for (unsigned int k = 0; k < coeff_count; ++k) {
+    for (unsigned int k = 0; k < filter_len; ++k) {
         coeff_vecs[k] = vec_splats(coeffs[k]);
     }
 
@@ -79,14 +82,14 @@ void fir_filter(const float * __restrict__ input,
     unsigned int out_idx = 0;
 
     // Set up prefetch stream with G5-optimized parameters
-    vec_dst(input, DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE), 0);
+    vec_dst(input, PREFETCH_CONTROL_SEQ, 0);
 
     // Main vectorized loop - process UNROLL_FACTOR outputs per iteration
     for (unsigned int b = 0; b < output_blocks; ++b) {
-        // Update prefetch for upcoming data
-        if ((b & 7) == 0) {  // Update every 8 blocks to reduce overhead
-            vec_dst(input + out_idx + UNROLL_FACTOR * 8,
-                    DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE), 0);
+        // Update prefetch periodically for upcoming data
+        if ((b & (PREFETCH_UPDATE_INTERVAL - 1)) == 0) {
+            vec_dst(input + out_idx + UNROLL_FACTOR * PREFETCH_UPDATE_INTERVAL,
+                    PREFETCH_CONTROL_SEQ, 0);
         }
 
         // Initialize 8 accumulator vectors
@@ -101,7 +104,7 @@ void fir_filter(const float * __restrict__ input,
 
         // Process coefficients with 4-way unrolling for better ILP
         unsigned int k = 0;
-        const unsigned int k_unroll = (coeff_count / 4) * 4;
+        const unsigned int k_unroll = (filter_len / 4) * 4;
 
         for (; k < k_unroll; k += 4) {
             const float *in_ptr = input + out_idx + k;
@@ -154,7 +157,7 @@ void fir_filter(const float * __restrict__ input,
         }
 
         // Handle remaining coefficients
-        for (; k < coeff_count; ++k) {
+        for (; k < filter_len; ++k) {
             vector float coeff = coeff_vecs[k];
             const float *in_ptr = input + out_idx + k;
 
@@ -230,16 +233,16 @@ void fir_filter_vectorized(const float * __restrict__ input,
     const unsigned int vec_outputs = output_len / VEC_SIZE;
 
     // Set up prefetch stream
-    vec_dst(input, DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE), 0);
+    vec_dst(input, PREFETCH_CONTROL_SEQ, 0);
 
     // Process 4 outputs at a time
     for (unsigned int v = 0; v < vec_outputs; ++v) {
         unsigned int base = v * VEC_SIZE;
 
         // Update prefetch periodically
-        if ((v & 15) == 0) {
-            vec_dst(input + base + VEC_SIZE * 16,
-                    DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE), 0);
+        if ((v & (PREFETCH_UPDATE_INTERVAL * 2 - 1)) == 0) {
+            vec_dst(input + base + VEC_SIZE * PREFETCH_UPDATE_INTERVAL * 2,
+                    PREFETCH_CONTROL_SEQ, 0);
         }
 
         vector float acc = vec_splats(0.0f);

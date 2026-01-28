@@ -12,10 +12,6 @@
 #if defined(__ALTIVEC__) && defined(__VEC__)
 #define UNROLL_FACTOR 8                         // Number of vectors to unroll
 #define BLOCK_FLOATS (VEC_SIZE * UNROLL_FACTOR) // 32 floats per block
-#define BLOCK_BYTES (BLOCK_FLOATS * sizeof(float))
-
-// Prefetch distance for G5 (in cache lines, G5 has 128-byte cache lines)
-#define PREFETCH_DISTANCE 256
 
 /**
  * vec_sum - Sum an array of floats using PowerPC AltiVec SIMD instructions
@@ -62,12 +58,14 @@ float vec_sum(const float * __restrict__ data, unsigned int N) {
     
     const float *ptr = data;
     
+    // Set up initial prefetch stream
+    vec_dst(data, PREFETCH_CONTROL_SEQ, 0);
+
     // Main vectorized loop - process 32 floats (8 vectors) per iteration
     for (unsigned int b = 0; b < blocks; ++b) {
-        // Prefetch next block for G5's deep pipeline
-        // G5 benefits from aggressive prefetching
-        if (b + 1 < blocks) {
-            vec_dst(ptr + BLOCK_FLOATS, PREFETCH_DISTANCE, 0);
+        // Update prefetch periodically for upcoming data
+        if ((b & (PREFETCH_UPDATE_INTERVAL - 1)) == 0 && b + PREFETCH_UPDATE_INTERVAL < blocks) {
+            vec_dst(ptr + BLOCK_FLOATS * PREFETCH_UPDATE_INTERVAL, PREFETCH_CONTROL_SEQ, 0);
         }
         
         // Load and accumulate 8 vectors

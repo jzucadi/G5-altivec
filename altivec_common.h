@@ -29,6 +29,19 @@
 #define PREFETCH_STRIDE G5_CACHE_LINE_SIZE
 
 /*
+ * Prefetch update interval - how often to refresh prefetch streams
+ * Update every N loop iterations to balance overhead vs. cache efficiency
+ * Value of 8 works well for G5's 32KB L1 data cache
+ */
+#define PREFETCH_UPDATE_INTERVAL 8
+
+/*
+ * Standard prefetch control word for sequential float array access
+ * Block size 4 = 16 bytes (one vector), 8 blocks, 128-byte stride
+ */
+#define PREFETCH_CONTROL_SEQ DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE)
+
+/*
  * Alignment check macro
  * Usage: ASSERT_ALIGNED(ptr, "description")
  */
