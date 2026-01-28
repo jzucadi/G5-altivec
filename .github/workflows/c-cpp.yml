@@ -55,23 +55,23 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y gcc-powerpc-linux-gnu qemu-user qemu-user-static
     
-    - name: Build vector summation
-      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec G5.c -o vec_sum
-    
-    - name: Build vector summation with tests
-      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec -DTEST_VEC_SUM G5.c -o vec_sum_test
-    
-    - name: Build FIR filter
-      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec G5_fir.c -o fir_filter
-    
-    - name: Build FIR filter with tests
-      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec -DTEST_FIR_FILTER G5_fir.c -o fir_filter_test
-    
-    - name: Build GEMV
-      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec G5_gemv.c -o gemv
-    
-    - name: Build GEMV with tests
-      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec -DTEST_GEMV G5_gemv.c -o gemv_test
+    - name: Build vector summation (object file)
+      run: powerpc-linux-gnu-gcc -O3 -c -maltivec -mabi=altivec G5.c -o vec_sum.o
+
+    - name: Build vector summation test executable
+      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec -DTEST_VEC_SUM G5.c -o vec_sum_test -lm
+
+    - name: Build FIR filter (object file)
+      run: powerpc-linux-gnu-gcc -O3 -c -maltivec -mabi=altivec G5_fir.c -o fir_filter.o
+
+    - name: Build FIR filter test executable
+      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec -DTEST_FIR_FILTER G5_fir.c -o fir_filter_test -lm
+
+    - name: Build GEMV (object file)
+      run: powerpc-linux-gnu-gcc -O3 -c -maltivec -mabi=altivec G5_gemv.c -o gemv.o
+
+    - name: Build GEMV test executable
+      run: powerpc-linux-gnu-gcc -O3 -static -maltivec -mabi=altivec -DTEST_GEMV G5_gemv.c -o gemv_test -lm
     
     - name: Test vector summation
       run: qemu-ppc -cpu G4 ./vec_sum_test
@@ -91,12 +91,8 @@ jobs:
       with:
         name: powerpc-binaries
         path: |
-          vec_sum
-          vec_sum_test
-          fir_filter
-          fir_filter_test
-          gemv
-          gemv_test
+          *.o
+          *_test
 
   lint:
     name: Code quality checks
