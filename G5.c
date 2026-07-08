@@ -1,7 +1,7 @@
 /*
  * G5.c - Optimized floating point summation for PowerPC G5 with AltiVec
  *
- * Compile with: gcc -O3 -faltivec -maltivec G5.c
+ * Compile with: powerpc-linux-gnu-gcc -O3 -maltivec -mabi=altivec G5.c
  *
  * This implementation uses AltiVec SIMD instructions optimized for the
  * IBM PowerPC 970 (G5) processor's deep pipeline and memory subsystem.

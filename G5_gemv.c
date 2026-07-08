@@ -1,7 +1,7 @@
 /*
  * G5_gemv.c - Optimized matrix-vector multiplication for PowerPC G5 with AltiVec
  *
- * Compile with: gcc -O3 -faltivec -maltivec G5_gemv.c
+ * Compile with: powerpc-linux-gnu-gcc -O3 -maltivec -mabi=altivec G5_gemv.c
  *
  * This implementation uses AltiVec SIMD instructions optimized for the
  * IBM PowerPC 970 (G5) processor's deep pipeline and memory subsystem.
@@ -16,6 +16,36 @@
 
 #define UNROLL_FACTOR 4                         // Rows processed per iteration
 
+/*
+ * Scalar implementations - used as the small-size / misaligned-lda fallback
+ * and as the reference computation in the test suite.
+ */
+static void gemv_scalar(const float *A, const float *x, float *y,
+                        unsigned int M, unsigned int N, unsigned int lda) {
+    for (unsigned int i = 0; i < M; ++i) {
+        float sum = 0.0f;
+        const float *row = A + i * lda;
+        for (unsigned int j = 0; j < N; ++j) {
+            sum += row[j] * x[j];
+        }
+        y[i] = sum;
+    }
+}
+
+static void gemv_transposed_scalar(const float *A, const float *x, float *y,
+                                   unsigned int M, unsigned int N, unsigned int lda) {
+    for (unsigned int j = 0; j < N; ++j) {
+        y[j] = 0.0f;
+    }
+    for (unsigned int i = 0; i < M; ++i) {
+        float xi = x[i];
+        const float *row = A + i * lda;
+        for (unsigned int j = 0; j < N; ++j) {
+            y[j] += row[j] * xi;
+        }
+    }
+}
+
 /**
  * gemv - Matrix-vector multiplication using PowerPC AltiVec SIMD
  * @A:      Pointer to M x N matrix in row-major order (must be 16-byte aligned)
@@ -29,7 +59,7 @@
  *
  * Optimizations for G5:
  * - 4-way row unrolling to hide memory latency
- * - 8-way column accumulation within each row
+ * - Dual accumulators per row to reduce dependency chains
  * - Prefetching optimized for G5's memory subsystem
  * - Binary tree reduction for horizontal sum
  * - Efficient handling of non-aligned tail columns
@@ -51,14 +81,7 @@ void gemv(const float * __restrict__ A,
     // multiple of VEC_SIZE; vec_ld on an unaligned row silently loads from a
     // rounded-down address and returns wrong results.
     if (N < VEC_SIZE * 2 || M < UNROLL_FACTOR || lda % VEC_SIZE != 0) {
-        for (unsigned int i = 0; i < M; ++i) {
-            float sum = 0.0f;
-            const float *row = A + i * lda;
-            for (unsigned int j = 0; j < N; ++j) {
-                sum += row[j] * x[j];
-            }
-            y[i] = sum;
-        }
+        gemv_scalar(A, x, y, M, N, lda);
         return;
     }
 
@@ -103,8 +126,8 @@ void gemv(const float * __restrict__ A,
         const unsigned int col_unroll = (col_vecs / 2) * 2;
 
         for (; col < col_unroll; col += 2) {
-            int byte_off0 = VEC_BYTE_OFFSET(col);
-            int byte_off1 = VEC_BYTE_OFFSET(col + 1);
+            int byte_off0 = (int)(col * 16);
+            int byte_off1 = (int)((col + 1) * 16);
 
             // Load 2 vectors from x
             vector float xv0 = vec_ld(byte_off0, x);
@@ -130,7 +153,7 @@ void gemv(const float * __restrict__ A,
 
         // Handle remaining complete vector
         for (; col < col_vecs; ++col) {
-            int byte_off = VEC_BYTE_OFFSET(col);
+            int byte_off = (int)(col * 16);
             vector float xv = vec_ld(byte_off, x);
 
             acc0a = vec_madd(vec_ld(byte_off, row0), xv, acc0a);
@@ -184,7 +207,7 @@ void gemv(const float * __restrict__ A,
 
         // Vectorized portion
         for (unsigned int col = 0; col < col_vecs; ++col) {
-            int byte_off = VEC_BYTE_OFFSET(col);
+            int byte_off = (int)(col * 16);
             vector float xv = vec_ld(byte_off, x);
             vector float av = vec_ld(byte_off, row_ptr);
             acc = vec_madd(av, xv, acc);
@@ -228,26 +251,19 @@ void gemv_transposed(const float * __restrict__ A,
         return;
     }
 
-    // Initialize output to zero.
-    // memset (not vec_st): this runs before the alignment checks below, and
-    // vec_st on an unaligned y would silently store to a rounded-down address.
-    memset(y, 0, N * sizeof(float));
-
     // For small cases or a misaligned row stride, use scalar
+    // (also zero-initializes y)
     if (N < VEC_SIZE * 2 || M < 4 || lda % VEC_SIZE != 0) {
-        for (unsigned int i = 0; i < M; ++i) {
-            float xi = x[i];
-            const float *row = A + i * lda;
-            for (unsigned int j = 0; j < N; ++j) {
-                y[j] += row[j] * xi;
-            }
-        }
+        gemv_transposed_scalar(A, x, y, M, N, lda);
         return;
     }
 
     ASSERT_ALIGNED(A, "Matrix A");
     ASSERT_ALIGNED(x, "Vector x");
     ASSERT_ALIGNED(y, "Vector y");
+
+    // Initialize output to zero
+    memset(y, 0, N * sizeof(float));
 
     const unsigned int col_vecs = N / VEC_SIZE;
     const unsigned int col_tail = N % VEC_SIZE;
@@ -273,7 +289,7 @@ void gemv_transposed(const float * __restrict__ A,
 
         // Process columns in vectors
         for (unsigned int col = 0; col < col_vecs; ++col) {
-            int byte_off = VEC_BYTE_OFFSET(col);
+            int byte_off = (int)(col * 16);
 
             vector float yv = vec_ld(byte_off, y);
             vector float a0 = vec_ld(byte_off, row0);
@@ -305,7 +321,7 @@ void gemv_transposed(const float * __restrict__ A,
         vector float xv = vec_splats(xi);
 
         for (unsigned int col = 0; col < col_vecs; ++col) {
-            int byte_off = VEC_BYTE_OFFSET(col);
+            int byte_off = (int)(col * 16);
             vector float yv = vec_ld(byte_off, y);
             vector float av = vec_ld(byte_off, row_ptr);
             yv = vec_madd(av, xv, yv);
@@ -323,43 +339,6 @@ void gemv_transposed(const float * __restrict__ A,
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <math.h>
-
-// Scalar reference implementation for verification
-static void gemv_scalar(const float *A, const float *x, float *y,
-                        unsigned int M, unsigned int N, unsigned int lda) {
-    for (unsigned int i = 0; i < M; ++i) {
-        float sum = 0.0f;
-        const float *row = A + i * lda;
-        for (unsigned int j = 0; j < N; ++j) {
-            sum += row[j] * x[j];
-        }
-        y[i] = sum;
-    }
-}
-
-static void gemv_transposed_scalar(const float *A, const float *x, float *y,
-                                   unsigned int M, unsigned int N, unsigned int lda) {
-    for (unsigned int j = 0; j < N; ++j) {
-        y[j] = 0.0f;
-    }
-    for (unsigned int i = 0; i < M; ++i) {
-        float xi = x[i];
-        const float *row = A + i * lda;
-        for (unsigned int j = 0; j < N; ++j) {
-            y[j] += row[j] * xi;
-        }
-    }
-}
-
-static float max_error(const float *a, const float *b, unsigned int n) {
-    float max_err = 0.0f;
-    for (unsigned int i = 0; i < n; ++i) {
-        float err = fabsf(a[i] - b[i]);
-        if (err > max_err) max_err = err;
-    }
-    return max_err;
-}
 
 static float relative_error(const float *result, const float *expected, unsigned int n) {
     float max_rel = 0.0f;
@@ -390,20 +369,22 @@ int main() {
     };
     const int num_configs = sizeof(configs) / sizeof(configs[0]);
 
-    printf("--- Correctness Tests (gemv) ---\n");
+    printf("--- Correctness Tests (gemv and gemv_transposed) ---\n");
 
     int all_passed = 1;
 
     for (int c = 0; c < num_configs; ++c) {
         unsigned int M = configs[c][0];
         unsigned int N = configs[c][1];
+        unsigned int maxdim = M > N ? M : N;
 
-        // Allocate aligned memory
+        // Allocate aligned memory; x and y are sized max(M, N) so the same
+        // buffers serve both gemv (x: N, y: M) and gemv_transposed (x: M, y: N)
         float *A, *x, *y_vec, *y_ref;
         if (posix_memalign((void**)&A, 16, M * N * sizeof(float)) != 0 ||
-            posix_memalign((void**)&x, 16, N * sizeof(float)) != 0 ||
-            posix_memalign((void**)&y_vec, 16, M * sizeof(float)) != 0 ||
-            posix_memalign((void**)&y_ref, 16, M * sizeof(float)) != 0) {
+            posix_memalign((void**)&x, 16, maxdim * sizeof(float)) != 0 ||
+            posix_memalign((void**)&y_vec, 16, maxdim * sizeof(float)) != 0 ||
+            posix_memalign((void**)&y_ref, 16, maxdim * sizeof(float)) != 0) {
             fprintf(stderr, "Memory allocation failed\n");
             return 1;
         }
@@ -412,64 +393,32 @@ int main() {
         for (unsigned int i = 0; i < M * N; ++i) {
             A[i] = (float)((i % 17) - 8) * 0.1f;
         }
-        for (unsigned int j = 0; j < N; ++j) {
+        for (unsigned int j = 0; j < maxdim; ++j) {
             x[j] = (float)((j % 11) - 5) * 0.1f;
         }
 
-        // Compute reference
+        // y = A * x
         gemv_scalar(A, x, y_ref, M, N, N);
-
-        // Compute vectorized
         gemv(A, x, y_vec, M, N, N);
 
-        // Check results
         float err = max_error(y_vec, y_ref, M);
         float rel_err = relative_error(y_vec, y_ref, M);
         int passed = (rel_err < 1e-5f) || (err < 1e-6f);
 
-        printf("M=%3u, N=%3u: max_err=%e, rel_err=%e %s\n",
+        printf("gemv            M=%3u, N=%3u: max_err=%e, rel_err=%e %s\n",
                M, N, err, rel_err, passed ? "[PASS]" : "[FAIL]");
-
         if (!passed) all_passed = 0;
 
-        free(A);
-        free(x);
-        free(y_vec);
-        free(y_ref);
-    }
-
-    printf("\n--- Correctness Tests (gemv_transposed) ---\n");
-
-    for (int c = 0; c < num_configs; ++c) {
-        unsigned int M = configs[c][0];
-        unsigned int N = configs[c][1];
-
-        float *A, *x, *y_vec, *y_ref;
-        if (posix_memalign((void**)&A, 16, M * N * sizeof(float)) != 0 ||
-            posix_memalign((void**)&x, 16, M * sizeof(float)) != 0 ||
-            posix_memalign((void**)&y_vec, 16, N * sizeof(float)) != 0 ||
-            posix_memalign((void**)&y_ref, 16, N * sizeof(float)) != 0) {
-            fprintf(stderr, "Memory allocation failed\n");
-            return 1;
-        }
-
-        for (unsigned int i = 0; i < M * N; ++i) {
-            A[i] = (float)((i % 17) - 8) * 0.1f;
-        }
-        for (unsigned int i = 0; i < M; ++i) {
-            x[i] = (float)((i % 11) - 5) * 0.1f;
-        }
-
+        // y = A^T * x
         gemv_transposed_scalar(A, x, y_ref, M, N, N);
         gemv_transposed(A, x, y_vec, M, N, N);
 
-        float err = max_error(y_vec, y_ref, N);
-        float rel_err = relative_error(y_vec, y_ref, N);
-        int passed = (rel_err < 1e-5f) || (err < 1e-6f);
+        err = max_error(y_vec, y_ref, N);
+        rel_err = relative_error(y_vec, y_ref, N);
+        passed = (rel_err < 1e-5f) || (err < 1e-6f);
 
-        printf("M=%3u, N=%3u: max_err=%e, rel_err=%e %s\n",
+        printf("gemv_transposed M=%3u, N=%3u: max_err=%e, rel_err=%e %s\n",
                M, N, err, rel_err, passed ? "[PASS]" : "[FAIL]");
-
         if (!passed) all_passed = 0;
 
         free(A);
@@ -564,7 +513,7 @@ int main() {
     double flops_per_gemv = 2.0 * perf_M * perf_N;
     double total_flops = flops_per_gemv * iterations;
 
-    printf("Matrix size: %u x %u (%u iterations)\n", perf_M, perf_N, iterations);
+    printf("Matrix size: %u x %u (%d iterations)\n", perf_M, perf_N, iterations);
     printf("\n");
     printf("Scalar:         %.3f sec, %.2f MFLOPS\n",
            scalar_time, (total_flops / scalar_time) / 1e6);

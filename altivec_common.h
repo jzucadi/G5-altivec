@@ -37,7 +37,7 @@
 
 /*
  * Standard prefetch control word for sequential float array access
- * Block size 4 = 16 bytes (one vector), 8 blocks, 128-byte stride
+ * Block size 4 = 64 bytes (four 16-byte vectors), 8 blocks, 128-byte stride
  */
 #define PREFETCH_CONTROL_SEQ DST_CONTROL(4, PREFETCH_BLOCKS, PREFETCH_STRIDE)
 
@@ -49,46 +49,14 @@
     assert(((uintptr_t)(ptr) & 15) == 0 && msg " should be 16-byte aligned")
 
 /*
- * Byte offset calculation for vec_ld/vec_st
- * Converts vector index to byte offset (index * 16 bytes per vector)
- * vec_ld requires int type for offset parameter
- */
-#define VEC_BYTE_OFFSET(idx) ((int)((idx) * 16))
-
-/*
  * vec_extract_first - Extract the first scalar element from a vector
  * @v: The vector float to extract from
  *
  * Returns: The first (index 0) float element of the vector
- *
- * Uses vec_extract() on GCC/Clang for efficiency, falls back to
- * union-based extraction on other compilers.
  */
-#if defined(__GNUC__) || defined(__clang__)
-
 static inline float vec_extract_first(vector float v) {
     return vec_extract(v, 0);
 }
-
-static inline float vec_extract_at(vector float v, int i) {
-    return vec_extract(v, i);
-}
-
-#else
-
-static inline float vec_extract_first(vector float v) {
-    union { vector float vec; float f[4]; } u;
-    u.vec = v;
-    return u.f[0];
-}
-
-static inline float vec_extract_at(vector float v, int i) {
-    union { vector float vec; float f[4]; } u;
-    u.vec = v;
-    return u.f[i];
-}
-
-#endif /* __GNUC__ || __clang__ */
 
 /*
  * horizontal_sum - Reduce a vector to a scalar sum using binary tree reduction
@@ -114,6 +82,24 @@ static inline vector float horizontal_sum(vector float v) {
 static inline float horizontal_sum_scalar(vector float v) {
     return vec_extract_first(horizontal_sum(v));
 }
+
+/*
+ * max_error - Largest absolute difference between two float arrays
+ *
+ * Shared helper for the -DTEST_* test suites.
+ */
+#if defined(TEST_VEC_SUM) || defined(TEST_FIR_FILTER) || defined(TEST_GEMV)
+#include <math.h>
+
+static inline float max_error(const float *a, const float *b, unsigned int n) {
+    float max_err = 0.0f;
+    for (unsigned int i = 0; i < n; ++i) {
+        float err = fabsf(a[i] - b[i]);
+        if (err > max_err) max_err = err;
+    }
+    return max_err;
+}
+#endif /* TEST_* */
 
 #endif /* __ALTIVEC__ && __VEC__ */
 
