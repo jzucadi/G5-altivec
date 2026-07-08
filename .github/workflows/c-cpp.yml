@@ -56,3 +56,28 @@ jobs:
         path: |
           *.o
           *_test
+
+  debug-fir:
+    name: Debug FIR optimizer sensitivity
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install cross-compilation toolchain
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-powerpc-linux-gnu qemu-user qemu-user-static
+    - name: FIR at -O1
+      run: |
+        powerpc-linux-gnu-gcc -O1 -static -maltivec -mabi=altivec -DTEST_FIR_FILTER G5_fir.c -o fir_O1 -lm
+        qemu-ppc -cpu G4 ./fir_O1
+      continue-on-error: true
+    - name: FIR at -O3 -fno-tree-vectorize
+      run: |
+        powerpc-linux-gnu-gcc -O3 -fno-tree-vectorize -static -maltivec -mabi=altivec -DTEST_FIR_FILTER G5_fir.c -o fir_ntv -lm
+        qemu-ppc -cpu G4 ./fir_ntv
+      continue-on-error: true
+    - name: FIR at -O2
+      run: |
+        powerpc-linux-gnu-gcc -O2 -static -maltivec -mabi=altivec -DTEST_FIR_FILTER G5_fir.c -o fir_O2 -lm
+        qemu-ppc -cpu G4 ./fir_O2
+      continue-on-error: true

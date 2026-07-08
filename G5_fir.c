@@ -215,7 +215,17 @@ int main() {
         printf("input=%4u, filter=%3u, output=%4u: max_err=%e %s\n",
                input_len, filter_len, output_len, err, passed ? "[PASS]" : "[FAIL]");
 
-        if (!passed) all_passed = 0;
+        if (!passed) {
+            all_passed = 0;
+            // Dump mismatching elements to localize the failure
+            for (unsigned int i = 0; i < output_len; ++i) {
+                float d = fabsf(output_vec[i] - output_ref[i]);
+                if (d > 1e-5f) {
+                    printf("    [%3u] vec=%g ref=%g\n",
+                           i, output_vec[i], output_ref[i]);
+                }
+            }
+        }
 
         free(input);
         free(coeffs);
