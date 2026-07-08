@@ -9,6 +9,7 @@
  * Computes: y = A * x  (where A is M x N matrix, x is N-vector, y is M-vector)
  */
 
+#include <string.h>
 #include "altivec_common.h"
 
 #if defined(__ALTIVEC__) && defined(__VEC__)
@@ -45,8 +46,11 @@ void gemv(const float * __restrict__ A,
         return;
     }
 
-    // For small matrices, use scalar implementation
-    if (N < VEC_SIZE * 2 || M < UNROLL_FACTOR) {
+    // For small matrices or a misaligned row stride, use scalar implementation.
+    // Rows sit at A + i*lda, so they are only 16-byte aligned when lda is a
+    // multiple of VEC_SIZE; vec_ld on an unaligned row silently loads from a
+    // rounded-down address and returns wrong results.
+    if (N < VEC_SIZE * 2 || M < UNROLL_FACTOR || lda % VEC_SIZE != 0) {
         for (unsigned int i = 0; i < M; ++i) {
             float sum = 0.0f;
             const float *row = A + i * lda;
@@ -224,25 +228,13 @@ void gemv_transposed(const float * __restrict__ A,
         return;
     }
 
-    // Initialize output to zero
-    if (N < VEC_SIZE * 2) {
-        for (unsigned int j = 0; j < N; ++j) {
-            y[j] = 0.0f;
-        }
-    } else {
-        // Vectorized zero initialization
-        vector float zero = vec_splats(0.0f);
-        unsigned int j = 0;
-        for (; j + VEC_SIZE <= N; j += VEC_SIZE) {
-            vec_st(zero, 0, y + j);
-        }
-        for (; j < N; ++j) {
-            y[j] = 0.0f;
-        }
-    }
+    // Initialize output to zero.
+    // memset (not vec_st): this runs before the alignment checks below, and
+    // vec_st on an unaligned y would silently store to a rounded-down address.
+    memset(y, 0, N * sizeof(float));
 
-    // For small cases, use scalar
-    if (N < VEC_SIZE * 2 || M < 4) {
+    // For small cases or a misaligned row stride, use scalar
+    if (N < VEC_SIZE * 2 || M < 4 || lda % VEC_SIZE != 0) {
         for (unsigned int i = 0; i < M; ++i) {
             float xi = x[i];
             const float *row = A + i * lda;
@@ -484,6 +476,41 @@ int main() {
         free(x);
         free(y_vec);
         free(y_ref);
+    }
+
+    printf("\n--- Odd-lda Tests (lda not a multiple of %d) ---\n", VEC_SIZE);
+    {
+        // Rows at A + i*lda are unaligned when lda isn't a multiple of
+        // VEC_SIZE; both functions must fall back to scalar and stay correct.
+        const unsigned int M = 16, N = 16, lda = 17;
+        float *A, *x, *y_vec, *y_ref;
+        if (posix_memalign((void**)&A, 16, M * lda * sizeof(float)) != 0 ||
+            posix_memalign((void**)&x, 16, N * sizeof(float)) != 0 ||
+            posix_memalign((void**)&y_vec, 16, M * sizeof(float)) != 0 ||
+            posix_memalign((void**)&y_ref, 16, M * sizeof(float)) != 0) {
+            fprintf(stderr, "Memory allocation failed\n");
+            return 1;
+        }
+        for (unsigned int i = 0; i < M * lda; ++i) A[i] = (float)((i % 17) - 8) * 0.1f;
+        for (unsigned int j = 0; j < N; ++j) x[j] = (float)((j % 11) - 5) * 0.1f;
+
+        gemv_scalar(A, x, y_ref, M, N, lda);
+        gemv(A, x, y_vec, M, N, lda);
+        float err = max_error(y_vec, y_ref, M);
+        int passed = (err < 1e-5f);
+        printf("gemv            M=%u, N=%u, lda=%u: max_err=%e %s\n",
+               M, N, lda, err, passed ? "[PASS]" : "[FAIL]");
+        if (!passed) all_passed = 0;
+
+        gemv_transposed_scalar(A, x, y_ref, M, N, lda);
+        gemv_transposed(A, x, y_vec, M, N, lda);
+        err = max_error(y_vec, y_ref, N);
+        passed = (err < 1e-5f);
+        printf("gemv_transposed M=%u, N=%u, lda=%u: max_err=%e %s\n",
+               M, N, lda, err, passed ? "[PASS]" : "[FAIL]");
+        if (!passed) all_passed = 0;
+
+        free(A); free(x); free(y_vec); free(y_ref);
     }
 
     // Performance benchmark

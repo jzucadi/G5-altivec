@@ -230,7 +230,14 @@ void fir_filter_vectorized(const float * __restrict__ input,
     ASSERT_ALIGNED(input, "Input");
     ASSERT_ALIGNED(output, "Output");
 
-    const unsigned int vec_outputs = output_len / VEC_SIZE;
+    // The unaligned-load idiom below (vec_ld(0, p) + vec_ld(16, p) + vec_perm)
+    // can touch up to 15 bytes past the last input element it needs, so the
+    // final block of outputs could read past the end of the input array.
+    // Peel one vector block off and let the scalar tail loop handle it: the
+    // last vectorized block then starts at base <= output_len - 8, keeping
+    // every 32-byte load window inside input[0 .. input_len-1].
+    // (output_len >= VEC_SIZE * 2 is guaranteed by the early return above.)
+    const unsigned int vec_outputs = (output_len - VEC_SIZE) / VEC_SIZE;
 
     // Set up prefetch stream
     vec_dst(input, PREFETCH_CONTROL_SEQ, 0);
